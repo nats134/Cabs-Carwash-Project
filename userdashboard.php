@@ -1,9 +1,13 @@
 <?php
-
 // Start the session only if not already started
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
+
+// Prevent caching
+header("Cache-Control: no-cache, no-store, must-revalidate"); // HTTP 1.1
+header("Pragma: no-cache"); // HTTP 1.0
+header("Expires: 0"); // Proxies
 
 // Include database connection
 require 'db_connection.php';
@@ -17,7 +21,6 @@ if (!isset($_SESSION['user_id'])) {
 $user_id = $_SESSION['user_id'] ?? null;
 
 if (!$user_id) {
-    error_log("Session user_id is not set. Redirecting to login.");
     header("Location: login.php");
     exit();
 }
@@ -39,33 +42,44 @@ if ($result !== false) {
     }
 }
 
-// Debugging: Log the fetched user data
-error_log("Fetched User Data: " . var_export($user, true));
-
 $stmt->close();
 
 // ==================================================
 // Fetch reserved orders for the user
+
+// Refresh reserved orders from the database
+$_SESSION['reserved_orders'] = []; // Clear the existing session data
+
+// SQL query to fetch reserved orders for the current user
 $sql = "SELECT order_id, service, appointment_date, appointment_time, status 
         FROM orders 
         WHERE user_id = ? AND status = 'Reserved'";
 
+// Prepare and execute the query
 $stmt = $conn->prepare($sql);
-$stmt->bind_param("i", $user_id);
-$stmt->execute();
-$result = $stmt->get_result();
+if ($stmt) {
+    $stmt->bind_param("i", $user_id); // Bind the user ID parameter
+    if ($stmt->execute()) {
+        $result = $stmt->get_result(); // Get the result set
 
-$reserved_orders = [];
-while ($row = $result->fetch_assoc()) {
-    $row['services'] = json_decode($row['service'], true); // Decode services
-    $reserved_orders[] = $row;
-
-    // Debug: Log the fetched appointment date and time
-    error_log("Fetched Appointment Date: " . $row['appointment_date']);
-    error_log("Fetched Appointment Time: " . $row['appointment_time']);
+        // Fetch and process each row
+        while ($row = $result->fetch_assoc()) {
+            // Decode the 'service' field from JSON to an array
+            $row['services'] = json_decode($row['service'], true);
+            // Add the row to the reserved_orders array
+            $_SESSION['reserved_orders'][] = $row;
+        }
+    } else {
+        // Handle query execution error
+        error_log("Failed to execute query: " . $stmt->error);
+    }
+    $stmt->close(); // Close the statement
+} else {
+    // Handle query preparation error
+    error_log("Failed to prepare statement: " . $conn->error);
 }
 
-$stmt->close();// ==================================================
+// ==================================================
 
 // Fetch services and detailings
 $services = $conn->query("SELECT id, name, price_small, price_medium, price_large, image FROM services");
@@ -144,24 +158,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['detailing_id'], $_POST
 }
 
 // Define days and calculate actual dates
-$days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]; // Ensure $days is initialized as an array
+$days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 $dates = [];
 
-if (is_array($days)) { // Check if $days is an array
+if (is_array($days)) {
     foreach ($days as $day) {
-        $timestamp = strtotime("next " . $day); // Calculate the timestamp for the next occurrence of the day
-        if ($timestamp !== false) { // Check if strtotime returned a valid timestamp
-            $dates[$day] = date("Y-m-d", $timestamp); // Store the date in the $dates array
-        } else {
-            error_log("Warning: Invalid day format or strtotime failed for day: " . $day);
+        $timestamp = strtotime("next " . $day);
+        if ($timestamp !== false) {
+            $dates[$day] = date("Y-m-d", $timestamp);
         }
     }
-} else {
-    error_log("Warning: \$days is not an array or is null.");
 }
-
-// Debugging: Log the $dates array
-error_log("Dates: " . print_r($dates, true));
 
 // Appointment booking
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['appointment_date'])) {
@@ -193,14 +200,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['appointment_date'])) {
                         'name' => 'Appointment',
                         'date' => $appointment_date,
                         'time' => $appointment_time,
-                        'price' => 0, // Add default price for appointments
-                        'vehicle_type' => 'N/A' // Add default vehicle type for appointments
+                        'price' => 0,
+                        'vehicle_type' => 'N/A'
                     ];
 
                     $stmt = $conn->prepare("INSERT INTO appointments (user_id, appointment_date, appointment_time) VALUES (?, ?, ?)");
                     $stmt->bind_param("iss", $user_id, $appointment_date, $appointment_time);
                     if (!$stmt->execute()) {
-                        error_log("Failed to insert appointment: " . $stmt->error);
+                        echo "<script>alert('Failed to book appointment.');</script>";
                     }
                     $stmt->close();
 
@@ -224,12 +231,12 @@ if (isset($_GET['remove'])) {
 // Calculate total price of services in cart
 $total = 0;
 foreach ($_SESSION['cart'] as $item) {
-    $total += $item['price'] ?? 0; // Use default value if price is missing
+    $total += $item['price'] ?? 0;
 }
 
 if ($_SERVER['REQUEST_METHOD'] == "POST" && isset($_POST['reserve_order'])) {
     if (!empty($_SESSION['cart'])) {
-        $user_id = $_SESSION['user_id'] ?? 0; // Ensure user ID is set
+        $user_id = $_SESSION['user_id'] ?? 0;
         $status = "Reserved";
         $created_at = date('Y-m-d H:i:s');
 
@@ -237,7 +244,6 @@ if ($_SERVER['REQUEST_METHOD'] == "POST" && isset($_POST['reserve_order'])) {
         $appointment_date = null;
         $appointment_time = null;
 
-        // Find the appointment in the cart
         foreach ($_SESSION['cart'] as $item) {
             if (strtolower(trim($item['name'])) === 'appointment') {
                 $appointment_date = $item['date'];
@@ -246,7 +252,6 @@ if ($_SERVER['REQUEST_METHOD'] == "POST" && isset($_POST['reserve_order'])) {
             }
         }
 
-        // If no appointment is found, use default values
         if (!$appointment_date || !$appointment_time) {
             $appointment_date = date('Y-m-d');
             $appointment_time = '00:00:00';
@@ -279,20 +284,16 @@ if ($_SERVER['REQUEST_METHOD'] == "POST" && isset($_POST['reserve_order'])) {
 
         if ($stmt->execute()) {
             // Retrieve the auto-generated order_id
-            $order_id = $conn->insert_id; // Get the last inserted ID
-            echo "<pre>Order inserted successfully with order ID: " . $order_id . "</pre>"; // Debugging
+            $order_id = $conn->insert_id;
 
             // Store the reserved order in session
             $_SESSION['reserved_orders'][] = [
-                'order_id' => $order_id, // Use the auto-generated order_id
+                'order_id' => $order_id,
                 'services' => $_SESSION['cart'],
                 'appointment_date' => $appointment_date,
                 'appointment_time' => $appointment_time,
                 'status' => 'Reserved'
             ];
-
-            // Debugging: Confirm session data
-            echo "<pre>Session reserved_orders after insertion: " . print_r($_SESSION['reserved_orders'], true) . "</pre>";
 
             // Clear shopping cart after reserving
             $_SESSION['cart'] = [];
@@ -300,7 +301,6 @@ if ($_SERVER['REQUEST_METHOD'] == "POST" && isset($_POST['reserve_order'])) {
             echo "<script>alert('Order reserved successfully!');</script>";
         } else {
             echo "<script>alert('Failed to reserve order.');</script>";
-            error_log("Error inserting order: " . $stmt->error);
         }
 
         $stmt->close();
@@ -309,69 +309,68 @@ if ($_SERVER['REQUEST_METHOD'] == "POST" && isset($_POST['reserve_order'])) {
     }
 }
 
-////////////////////
+// Handle Order Confirmation
+if ($_SERVER['REQUEST_METHOD'] == "POST" && isset($_POST['confirm_order'])) {
+    $orderIndex = $_POST['order_index'];
 
-if ($_SERVER['REQUEST_METHOD'] == "POST") {
-    // Handle Order Confirmation
-    if (isset($_POST['confirm_order'])) {
-        $orderIndex = $_POST['order_index'];
-        echo "<pre>Confirming order index: " . $orderIndex . "</pre>"; // Debugging
+    if (isset($_SESSION['reserved_orders'][$orderIndex])) {
+        // Get the order ID from the session
+        $order_id = $_SESSION['reserved_orders'][$orderIndex]['order_id'];
 
-        if (isset($_SESSION['reserved_orders'][$orderIndex])) {
-            // Get the order ID from the session
-            $order_id = $_SESSION['reserved_orders'][$orderIndex]['order_id'];
-            echo "<pre>Confirming order ID: " . $order_id . "</pre>"; // Debugging
+        // Update the status in the database to "Confirmed"
+        $stmt = $conn->prepare("UPDATE orders SET status = 'Confirmed' WHERE order_id = ?");
+        $stmt->bind_param("i", $order_id);
 
-            // Update the status in the database to "Confirmed"
-            $stmt = $conn->prepare("UPDATE orders SET status = 'Confirmed' WHERE order_id = ?");
-            $stmt->bind_param("i", $order_id); // Use "i" for integer order_id
-
-            if ($stmt->execute()) {
-                echo "<pre>Order status updated successfully for order ID: " . $order_id . "</pre>"; // Debugging
-                // Remove the order from the reserved_orders array
-                unset($_SESSION['reserved_orders'][$orderIndex]);
-                // Reindex the reserved_orders array
-                $_SESSION['reserved_orders'] = array_values($_SESSION['reserved_orders']);
-                echo "<script>alert('Order confirmed successfully!');</script>";
-            } else {
-                echo "<pre>Failed to update order status in database: " . $stmt->error . "</pre>"; // Debugging
-            }
-            $stmt->close();
+        if ($stmt->execute()) {
+            // Remove the order from the reserved_orders array
+            unset($_SESSION['reserved_orders'][$orderIndex]);
+            // Reindex the reserved_orders array
+            $_SESSION['reserved_orders'] = array_values($_SESSION['reserved_orders']);
+            echo "<script>alert('Order confirmed successfully!');</script>";
         } else {
-            echo "<pre>Invalid order or no reserved orders found.</pre>"; // Debugging
-            echo "<script>alert('Invalid order or no reserved orders found.');</script>";
+            echo "<script>alert('Failed to confirm order.');</script>";
         }
+        $stmt->close();
+    } else {
+        echo "<script>alert('Invalid order or no reserved orders found.');</script>";
     }
+}
 
-    // Handle Order Cancellation
-    if (isset($_POST['cancel_order'])) {
-        $orderIndex = $_POST['order_index'];
-        echo "<pre>Cancelling order index: " . $orderIndex . "</pre>"; // Debugging
+// Handle Order Cancellation
+if ($_SERVER['REQUEST_METHOD'] == "POST" && isset($_POST['cancel_order'])) {
+    $orderIndex = $_POST['order_index'];
 
-        if (isset($_SESSION['reserved_orders'][$orderIndex])) {
-            // Get the order ID from the session
-            $order_id = $_SESSION['reserved_orders'][$orderIndex]['order_id'];
-            echo "<pre>Cancelling order ID: " . $order_id . "</pre>"; // Debugging
+    if (isset($_SESSION['reserved_orders'][$orderIndex])) {
+        // Get the order ID and appointment details from the session
+        $order_id = $_SESSION['reserved_orders'][$orderIndex]['order_id'];
+        $appointment_date = $_SESSION['reserved_orders'][$orderIndex]['appointment_date'];
+        $appointment_time = $_SESSION['reserved_orders'][$orderIndex]['appointment_time'];
 
-            // Update the status in the database to "Cancelled"
-            $stmt = $conn->prepare("UPDATE orders SET status = 'Cancelled' WHERE order_id = ?");
-            $stmt->bind_param("i", $order_id); // Use "i" for integer order_id
+        // Update the status in the database to "Cancelled"
+        $stmt = $conn->prepare("UPDATE orders SET status = 'Cancelled' WHERE order_id = ?");
+        $stmt->bind_param("i", $order_id);
 
-            if ($stmt->execute()) {
-                echo "<pre>Order status updated successfully for order ID: " . $order_id . "</pre>"; // Debugging
+        if ($stmt->execute()) {
+            // Delete the corresponding appointment from the appointments table
+            $delete_stmt = $conn->prepare("DELETE FROM appointments WHERE appointment_date = ? AND appointment_time = ?");
+            $delete_stmt->bind_param("ss", $appointment_date, $appointment_time);
+
+            if ($delete_stmt->execute()) {
                 // Remove the order from the reserved_orders array
                 unset($_SESSION['reserved_orders'][$orderIndex]);
                 // Reindex the reserved_orders array
                 $_SESSION['reserved_orders'] = array_values($_SESSION['reserved_orders']);
                 echo "<script>alert('Order has been cancelled!');</script>";
             } else {
-                echo "<pre>Failed to update order status in database: " . $stmt->error . "</pre>"; // Debugging
+                echo "<script>alert('Failed to delete appointment.');</script>";
             }
-            $stmt->close();
+            $delete_stmt->close();
         } else {
-            echo "<pre>Invalid order or no reserved orders found.</pre>"; // Debugging
-            echo "<script>alert('Invalid order or no reserved orders found.');</script>";
+            echo "<script>alert('Failed to cancel order.');</script>";
         }
+        $stmt->close();
+    } else {
+        echo "<script>alert('Invalid order or no reserved orders found.');</script>";
     }
 }
 
@@ -388,18 +387,12 @@ if ($stmt) {
     if ($stmt->execute()) {
         $result = $stmt->get_result();
         while ($row = $result->fetch_assoc()) {
-            // Decode the JSON-encoded services
             $row['services'] = json_decode($row['service'], true);
             $confirmed_orders[] = $row;
         }
-    } else {
-        error_log("Failed to fetch confirmed orders: " . $stmt->error);
     }
     $stmt->close();
-} else {
-    error_log("Failed to prepare confirmed orders query: " . $conn->error);
 }
-
 
 // Fetch cancelled orders
 $stmt = $conn->prepare("SELECT order_id, service, appointment_date, appointment_time, status 
@@ -410,21 +403,14 @@ if ($stmt) {
     if ($stmt->execute()) {
         $result = $stmt->get_result();
         while ($row = $result->fetch_assoc()) {
-            // Decode the JSON-encoded services
             $row['services'] = json_decode($row['service'], true);
             $cancelled_orders[] = $row;
         }
-    } else {
-        error_log("Failed to fetch cancelled orders: " . $stmt->error);
     }
     $stmt->close();
-} else {
-    error_log("Failed to prepare cancelled orders query: " . $conn->error);
 }
 
-
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -485,15 +471,15 @@ if ($stmt) {
         .cart-icon {
         background: #FFD700;
         color: black;
-        padding: 15px;
+        padding: 12px;
         font-size: 24px;
         font-weight: bold;
         border-radius: 50%;
         cursor: pointer;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        box-shadow: 0 4px 8px rgba(100, 0, 0, 0.2);
         position: fixed;
-        bottom: 20px;
-        right: 20px;
+        bottom: 80px;
+        right: 15px;
         z-index: 1000;
     }
 
@@ -504,8 +490,8 @@ if ($stmt) {
         padding: 15px;
         box-shadow: 0 4px 8px rgba(0,0,0,0.2);
         position: fixed;
-        bottom: 80px;
-        right: 20px;
+        bottom: 120px;
+        right: 80px;
         width: 300px;
         display: none;
         z-index: 1000;
@@ -577,15 +563,15 @@ input[type="time"]:hover::-webkit-calendar-picker-indicator {
 .receipt-icon {
     background: #FFD700;
     color: black;
-    padding: 15px;
+    padding: 14px;
     font-size: 24px;
     font-weight: bold;
     border-radius: 50%;
     cursor: pointer;
     box-shadow: 0 4px 8px rgba(0,0,0,0.2);
     position: fixed;
-    bottom: 80px;
-    right: 20px;
+    bottom: 150px;
+    right: 15px;
     z-index: 1000;
 }
 
@@ -596,8 +582,8 @@ input[type="time"]:hover::-webkit-calendar-picker-indicator {
     padding: 15px;
     box-shadow: 0 4px 8px rgba(0,0,0,0.2);
     position: fixed;
-    bottom: 140px;
-    right: 20px;
+    bottom: 185px;
+    right: 80px;
     width: 300px;
     display: none;
     z-index: 1000;
@@ -605,7 +591,7 @@ input[type="time"]:hover::-webkit-calendar-picker-indicator {
 
 
     .scrollable-container {
-        max-height: 400px; /* Set the maximum height for the scrollable area */
+        max-height: 300px; /* Set the maximum height for the scrollable area */
         overflow-y: auto; /* Enable vertical scrolling */
         border: 1px solid #ddd; /* Optional: Add a border for better visibility */
         
@@ -641,16 +627,16 @@ input[type="time"]:hover::-webkit-calendar-picker-indicator {
         <h3>Available Services</h3>
         <div class="row">
             <?php foreach ($services as $service): ?>
-                <div class="col-md-3">
+                <div class="col-md-3" id="services">
                     <div class="card p-3 mb-3">
                         <img src="images/<?php echo htmlspecialchars($service['image']); ?>" alt="<?php echo htmlspecialchars($service['name']); ?>" class="service-image">
                         <h4><?php echo htmlspecialchars($service['name']); ?></h4>
                         <form method="post">
                             <input type="hidden" name="service_id" value="<?php echo $service['id']; ?>">
                             <select name="vehicle_type" required>
-                                <option value="Small">Small - ₱<?php echo number_format($service['price_small'], 2); ?></option>
-                                <option value="Medium">Medium - ₱<?php echo number_format($service['price_medium'], 2); ?></option>
-                                <option value="Large">Large - ₱<?php echo number_format($service['price_large'], 2); ?></option>
+                                <option value="Small">Sedan(5 seater) - ₱<?php echo number_format($service['price_small'], 2); ?></option>
+                                <option value="Medium">SUV(7 seater) - ₱<?php echo number_format($service['price_medium'], 2); ?></option>
+                                <option value="Large">Van(7 seater) - ₱<?php echo number_format($service['price_large'], 2); ?></option>
                             </select>
                             <button type="submit" class="btn btn-primary mt-2">Add to Cart</button>
                         </form>
@@ -669,9 +655,9 @@ input[type="time"]:hover::-webkit-calendar-picker-indicator {
                         <form method="post">
                             <input type="hidden" name="detailing_id" value="<?php echo $detailing['id']; ?>">
                             <select name="vehicle_type" required>
-                                <option value="Small">Small - ₱<?php echo number_format($detailing['price_small'], 2); ?></option>
-                                <option value="Medium">Medium - ₱<?php echo number_format($detailing['price_medium'], 2); ?></option>
-                                <option value="Large">Large - ₱<?php echo number_format($detailing['price_large'], 2); ?></option>
+                                <option value="Small">Sedan (5 seater) - ₱<?php echo number_format($detailing['price_small'], 2); ?></option>
+                                <option value="Medium">SUV (7 seater) - ₱<?php echo number_format($detailing['price_medium'], 2); ?></option>
+                                <option value="Large">Van (7 seater) - ₱<?php echo number_format($detailing['price_large'], 2); ?></option>
                             </select>
                             <button type="submit" class="btn btn-primary mt-2">Add to Cart</button>
                         </form>
@@ -685,7 +671,7 @@ input[type="time"]:hover::-webkit-calendar-picker-indicator {
         <div class="row">
             <?php foreach ($days as $day): ?>
                 <?php $realDate = $dates[$day]; ?>
-                <div class="col-md-4">
+                <div class="col-md-4" id="booking">
                     <div class="card p-3 mb-3">
                         <h4><?php echo $day . " - " . date("F j, Y", strtotime($realDate)); ?></h4>
                         <form method="post">
@@ -759,7 +745,7 @@ input[type="time"]:hover::-webkit-calendar-picker-indicator {
         
     <!-- Receipt System Container -->
     <div class="receipt-container" id="receiptContainer">
-        <h4>Receipt System</h4>
+        <h4>Transactions</h4>
         <ul class="nav nav-tabs">
             <li class="nav-item">
                 <a class="nav-link active" id="reserved-tab" onclick="showTab('reserved')">Reserved Orders</a>
@@ -990,6 +976,10 @@ input[type="time"]:hover::-webkit-calendar-picker-indicator {
         document.getElementById('reserved-tab').classList.add('active');
         document.getElementById('reserved').classList.add('active');
     };
+
+    
+    (function(){if(!window.chatbase||window.chatbase("getState")!=="initialized"){window.chatbase=(...arguments)=>{if(!window.chatbase.q){window.chatbase.q=[]}window.chatbase.q.push(arguments)};window.chatbase=new Proxy(window.chatbase,{get(target,prop){if(prop==="q"){return target.q}return(...args)=>target(prop,...args)}})}const onLoad=function(){const script=document.createElement("script");script.src="https://www.chatbase.co/embed.min.js";script.id="tCOx2-6X6cn1Gh7YalMGY";script.domain="www.chatbase.co";document.body.appendChild(script)};if(document.readyState==="complete"){onLoad()}else{window.addEventListener("load",onLoad)}})();
+
     </script>
 
     <?php include 'footer.php'; ?>

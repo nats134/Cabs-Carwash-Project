@@ -205,25 +205,25 @@
     <section class="services py-5">
         <div class="container d-flex align-items-center">
             <div class="image-container me-4">
-                <img src="images/logo.png" class="img-fluid" alt="Services Image">
+                <img src="images/asset1.jpg" class="img-fluid" alt="Services Image">
             </div>
             <div>
                 <h2>Services, Detailing and Booking</h2>
                 <p>We offer several services, whether it's a car wash or detailing. You can also book your appointment here.</p>
-                <a href="#" class="btn btn-warning">Book Now</a>
+                <a href="booking.php" class="btn btn-warning">Book Now</a>
             </div>
         </div>
     </section>
     
     <section class="gallery-section text-center">
         <div class="container">
-            <h2>Slideshow Presentations</h2>
+            <h2>Gallery</h2>
             <div class="gallery">
                 <div class="gallery-item">
                     <div class="image-container">
-                        <img src="images/logo.png" alt="Basic Wash">
-                        <img src="images/logo.png" alt="Detailing">
-                        <img src="images/logo.png" alt="Polishing">
+                        <img src="images/carwash1.jpg" alt="Basic Wash">
+                        <img src="images/carwash2.jpg" alt="Detailing">
+                        <img src="images/carwash3.jpg" alt="Polishing">
                     </div>
                     <div class="nav-buttons">
                         <button class="prev">&#10094;</button>
@@ -232,9 +232,9 @@
                 </div>
                 <div class="gallery-item">
                     <div class="image-container">
-                        <img src="images/logo.png" alt="Paris">
-                        <img src="images/logo.png" alt="Tokyo">
-                        <img src="images/logo.png" alt="New York">
+                        <img src="images/carwash4.jpg" alt="Paris">
+                        <img src="images/detailing1.jpg" alt="Tokyo">
+                        <img src="images/detailing2.jpg" alt="New York">
                     </div>
                     <div class="nav-buttons">
                         <button class="prev">&#10094;</button>
@@ -243,9 +243,9 @@
                 </div>
                 <div class="gallery-item">
                     <div class="image-container">
-                        <img src="images/logo3.png" alt="Pizza">
-                        <img src="images/logo.png" alt="Sushi">
-                        <img src="images/logo.png" alt="Burger">
+                        <img src="images/asset2.jpg" alt="Pizza">
+                        <img src="images/asset3.jpg" alt="Sushi">
+                        <img src="images/asset4.jpg" alt="Burger">
                     </div>
                     <div class="nav-buttons">
                         <button class="prev">&#10094;</button>
@@ -255,7 +255,11 @@
             </div>
         </div>
     </section>
+    
+    <script>
+        (function(){if(!window.chatbase||window.chatbase("getState")!=="initialized"){window.chatbase=(...arguments)=>{if(!window.chatbase.q){window.chatbase.q=[]}window.chatbase.q.push(arguments)};window.chatbase=new Proxy(window.chatbase,{get(target,prop){if(prop==="q"){return target.q}return(...args)=>target(prop,...args)}})}const onLoad=function(){const script=document.createElement("script");script.src="https://www.chatbase.co/embed.min.js";script.id="tCOx2-6X6cn1Gh7YalMGY";script.domain="www.chatbase.co";document.body.appendChild(script)};if(document.readyState==="complete"){onLoad()}else{window.addEventListener("load",onLoad)}})();
 
+    </script>
     <?php include 'footer.php'; ?>
 </body>
 </html>
